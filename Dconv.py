@@ -1,4 +1,8 @@
-'''Module to learn a steerable basis'''
+'''Module to learn a steerable basis
+Obtained from the suport code of 
+Deep Scale-Spaces by D. E. Worral and M. Welling
+in https://github.com/danielewworrall/deep-scale-spaces'''
+
 import os
 import sys
 import time
@@ -14,7 +18,6 @@ from torch.nn import Parameter
 from torch.nn import functional as F
 
 from scipy.special import binom
-
 
 class Dconv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, base, io_scales, 
@@ -84,12 +87,17 @@ class Dconv2d(nn.Module):
                 else:
                     pass
         """
-        # Just your standard He initialization
-        n = self.kernel_size[0] * self.kernel_size[1] * self.kernel_scales * self.in_channels
-        self.weights.data.normal_(0, math.sqrt(2. / n))
+        ## Just your standard He initialization
+        #n = self.kernel_size[0] * self.kernel_size[1] * self.kernel_scales * self.in_channels
+        #self.weights.data.normal_(0, math.sqrt(2. / n))
 
+        #if self.bias is not None:
+        #    self.bias.data.fill_(0)
+        nn.init.kaiming_uniform_(self.weights, a=math.sqrt(5))
         if self.bias is not None:
-            self.bias.data.fill_(1)
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weights)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
 
 
     def forward(self, input):
@@ -110,7 +118,7 @@ class Dconv2d(nn.Module):
         # d is the index in the kernel, s is the index in the output
         for s in range(sout):
             # Cut out slices from the input
-            t = np.minimum(s + self.kernel_scales, sout)
+            t = min(s + self.kernel_scales, sout)
             x = input[:,:,s:t,:,:].reshape(input.size()[0],-1,input.size()[3],input.size()[4])
             # Cut out the weights
             weight_shape = (self.out_channels, self.in_channels*(t-s), self.kernel_size[0], self.kernel_size[1])
@@ -121,6 +129,117 @@ class Dconv2d(nn.Module):
                                     padding=padding, dilation=dilation[s]))
 
         return torch.stack(outputs, 2)
+
+#class Dconv2d(nn.Module):
+#    def __init__(self, in_channels, out_channels, kernel_size, base, io_scales, 
+#                 stride=1, padding=1, bias=False, pad_mode='constant'):
+#        """Create Dconv2d object        
+#
+#        Args:
+#            in_channels: ...
+#            out_channels: ...
+#            kernel_size: tuple (scales, height, width)
+#            base: float for downscaling factor
+#            io_scales: tuple (num_out_scales, num_in_scales)
+#            stride: ...
+#            padding: ...
+#            bias: bool
+#            pad_mode: ...
+#        """
+#        super(Dconv2d, self).__init__()
+#        # Channel info
+#        self.in_channels = in_channels
+#        self.out_channels = out_channels
+#        # Kernel sizes
+#        self.kernel_scales = kernel_size[0]
+#        self.kernel_size = kernel_size[1:]
+#        # Needed to compute padding of dilated convs
+#        self.overlap = [self.kernel_size[0]//2, self.kernel_size[1]//2]
+#        self.io_scales = io_scales.copy()
+#        # Compute the dilations needed in the scale-conv
+#        dilations = np.power(base, np.arange(io_scales[1]))
+#        self.dilations = [int(d) for d in dilations]
+#        # Basic info
+#        self.stride = stride
+#        self.padding = [padding,padding]
+#        self.pad_mode = pad_mode
+#        # The weights
+#        weight_shape = (out_channels, in_channels, self.kernel_scales, self.kernel_size[0], self.kernel_size[1])
+#        self.weights = Parameter(torch.Tensor(*weight_shape))
+#        # Optional bias
+#        if bias == True:
+#            self.bias = Parameter(torch.Tensor(out_channels))
+#        else:
+#            self.register_buffer('bias', None)
+#
+#        self.reset_parameters()
+#
+#    def __repr__(self):
+#        return ('{name}({in_channels}->{out_channels}, {kernel_scales}, {kernel_size}, ' 
+#                'dilations={dilations}, pad_mode={pad_mode})'
+#                .format(name=self.__class__.__name__, **self.__dict__))
+#
+#    def reset_parameters(self):
+#        """
+#        # Custom Yu/Koltun-initialization
+#        stdv = 1e-2
+#        wsh = self.weights.size()
+#        self.weights.data.uniform_(-stdv, stdv)
+#
+#        C = np.gcd(self.in_channels, self.out_channels)
+#        val = C / (self.out_channels)
+#        
+#        ci = self.kernel_size[0] // 2
+#        cj = self.kernel_size[1] // 2
+#        for b in range(self.out_channels):
+#            for a in range(self.in_channels):
+#                if np.floor(a*C/self.in_channels) == np.floor(b*C/self.out_channels):
+#                    self.weights.data[b,a,:,ci,cj] = val
+#                else:
+#                    pass
+#        """
+#        ## Just your standard He initialization
+#        #n = self.kernel_size[0] * self.kernel_size[1] * self.kernel_scales * self.in_channels
+#        #self.weights.data.normal_(0, math.sqrt(2. / n))
+#
+#        #if self.bias is not None:
+#        #    self.bias.data.fill_(0)
+#        nn.init.kaiming_uniform_(self.weights, a=math.sqrt(5))
+#        if self.bias is not None:
+#            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weights)
+#            bound = 1 / math.sqrt(fan_in)
+#            nn.init.uniform_(self.bias, -bound, bound)
+#
+#
+#    def forward(self, input):
+#        """Implement a scale conv the slow way
+#
+#        Args:
+#            inputs: [batch, channels, scale, height, width]
+#        Returns:
+#            inputs: [batch, channels, scale, height, width]
+#        """
+#        # Dilations
+#        dilation = [(self.dilations[d], self.dilations[d]) for d in range(len(self.dilations))]
+#        # Number of scales in and out
+#        sin = self.io_scales[1]
+#        sout = self.io_scales[0]
+#
+#        outputs = []
+#        # d is the index in the kernel, s is the index in the output
+#        for s in range(sout):
+#            # Cut out slices from the input
+#            t = np.minimum(s + self.kernel_scales, sout)
+#            x = input[:,:,s:t,:,:].reshape(input.size()[0],-1,input.size()[3],input.size()[4])
+#            # Cut out the weights
+#            weight_shape = (self.out_channels, self.in_channels*(t-s), self.kernel_size[0], self.kernel_size[1])
+#            w = self.weights[:,:,:t-s,:,:].reshape(weight_shape)
+#            # Convolve for one output scale, using appropriate padding
+#            padding = [int(dilation[s][0]*self.overlap[0]), int(dilation[s][1]*self.overlap[1])]
+#            outputs.append(F.conv2d(x, w, bias=self.bias, stride=self.stride, 
+#                                    padding=padding, dilation=dilation[s]))
+#
+#        return torch.stack(outputs, 2)
 
 
 class BesselConv2d(nn.Module):
@@ -135,7 +254,7 @@ class BesselConv2d(nn.Module):
     integer order. We can implement the entire function using 
     scipy.special.ive which is pretty handy.
     """
-    def __init__(self, base=2., zero_scale=0.5, n_scales=8, scales=None):
+    def __init__(self, dim=1, base=2., zero_scale=0.5, n_scales=8, scales=None):
         """Create a BesselConv2d object
 
         Args:
@@ -145,6 +264,8 @@ class BesselConv2d(nn.Module):
             scales: optional pre-computed scales
         """
         super(BesselConv2d, self).__init__()
+        
+        self.dim = dim
 
         if scales is not None:
             self.scales = scales
@@ -157,9 +278,11 @@ class BesselConv2d(nn.Module):
             k = np.arange(1, n_scales)
             dilations = np.power(base, k)
             self.scales = (zero_scale**2)*(dilations**2 - 1.)
+            self.scales = list(self.scales)
 
         print("Bessel scales: {}".format(self.scales))
-        self.widths = np.asarray([4*int(np.ceil(np.sqrt(scale))) for scale in self.scales])
+        self.widths = [4*int(np.ceil(np.sqrt(scale))) for scale in self.scales]
+        print(self.widths)
         self.weights = self._get_blur()
 
     def forward(self, input):
@@ -170,18 +293,18 @@ class BesselConv2d(nn.Module):
         Returns:
             [batch, channels, scale, height, width] tensor
         """
-        if self.scales != []:
-            pad = self.widths
-            output = [F.conv2d(input, self.weights[d][0].cuda(), bias=None, 
-                   padding=(0,pad[d]), stride=1, dilation=1) for d in range(len(pad))]
-            output = [F.conv2d(output[d], self.weights[d][1].cuda(), bias=None,
-                   padding=(pad[d], 0), stride=1, dilation=1) for d in range(len(pad))]
+        #if self.scales != []:
+        pad = self.widths
+        output = [F.conv2d(input, self.weights[d][0].cuda(), bias=None, 
+               padding=(0,pad[d]), stride=1, dilation=1) for d in range(len(pad))]
+        output = [F.conv2d(output[d], self.weights[d][1].cuda(), bias=None,
+               padding=(pad[d], 0), stride=1, dilation=1) for d in range(len(pad))]
 
-            output = torch.stack(output, dim=2)
-            input = torch.unsqueeze(input, 2)
-            output = torch.cat([input, output], 2)
-        else:
-            output = torch.unsqueeze(input, 2)
+        output = torch.stack(output, dim=2)
+        input = torch.unsqueeze(input, 2)
+        output = torch.cat([input, output], 2)
+        #else:
+        #    output = torch.unsqueeze(input, 2)
         return output
 
 
@@ -206,10 +329,10 @@ class BesselConv2d(nn.Module):
             # Create x- and y-kernels
             kernelx = self._np2torch(kernel[np.newaxis,:])
             kernely = self._np2torch(kernel[:,np.newaxis])
-
+            
             # This converts them to RGB-kernels...is this the best way?
-            kernelx = kernelx.view(1,1,1,2*width+1)*torch.eye(3).view(3,3,1,1)
-            kernely = kernely.view(1,1,2*width+1,1)*torch.eye(3).view(3,3,1,1)
+            kernelx = kernelx.view(1,1,1,2*width+1)*torch.eye(self.dim).view(self.dim,self.dim,1,1)
+            kernely = kernely.view(1,1,2*width+1,1)*torch.eye(self.dim).view(self.dim,self.dim,1,1)
 
             kernels.append((kernelx, kernely))
 
