@@ -1,2 +1,2 @@
 # deep-scale-spaces
-Forked to use with morphological scale-spaces
+Forked repository to use with morphological scale-spaces
