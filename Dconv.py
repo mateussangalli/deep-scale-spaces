@@ -1,7 +1,4 @@
-'''Module to learn a steerable basis
-Obtained from the suport code of 
-Deep Scale-Spaces by D. E. Worral and M. Welling
-in https://github.com/danielewworrall/deep-scale-spaces'''
+'''Module to learn a steerable basis'''
 
 import os
 import sys
